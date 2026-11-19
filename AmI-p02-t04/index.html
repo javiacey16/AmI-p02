@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tutorial 4: manos y el problema de Midas</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- MediaPipe no necesita etiquetas <script> aquí: index.js lo importa como módulo ES -->
+  </head>
+  <body>
+    <main>
+      <h1>Puntos clave de las manos con MediaPipe</h1>
+      <p id="status" role="status">Cargando MediaPipe…</p>
+
+      <button id="btnCamera" type="button" disabled>Activar cámara</button>
+
+      <!-- El vídeo y el canvas se superponen; el canvas dibuja los puntos de las manos.
+           playsinline es necesario en iOS Safari. -->
+      <div class="camView">
+        <video id="webcam" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+
+      <!-- aria-live: los lectores de pantalla anuncian cuándo se enciende o se apaga -->
+      <p id="lamp" class="lamp" aria-live="polite">Lámpara apagada</p>
+
+      <h2>Resultados</h2>
+      <dl id="results">
+        <dt>Manos detectadas</dt><dd id="numHands">–</dd>
+        <dt>Mano izquierda</dt><dd id="leftHand">–</dd>
+        <dt>Mano derecha</dt><dd id="rightHand">–</dd>
+        <dt>Pinza (pulgar–índice / mano)</dt><dd id="pinch">–</dd>
+        <dt>Activaciones</dt><dd id="activations">0</dd>
+        <dt>Fotogramas por segundo</dt><dd id="fps">–</dd>
+      </dl>
+    </main>
+
+    <script type="module" src="index.js"></script>
+  </body>
+</html>
