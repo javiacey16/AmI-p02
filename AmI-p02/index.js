@@ -231,6 +231,27 @@ const FIST = {
   graceMs: 150, // tolerance: short detection drops do not restart the hold
 };
 
+/**
+ * Forward / backward: right hand open with the fingers up, moved sideways. Moving it to the
+ * right (as seen on screen) jumps forward; to the left, backward. One swipe = one jump.
+ * CALIBRATE these values with the measures panel ("movimiento" line).
+ */
+const SWIPE = {
+  seekSeconds: 10, // size of each jump
+  minDx: 1.0, // horizontal wrist displacement within 0.5 s, in hand sizes
+  dominance: 2, // the horizontal movement must be this many times the vertical one
+  upMin: 0.5, // fingers roughly up (looser than activation: the hand tilts while moving)
+  // Defences (only when settings.defenses is on):
+  cooldownMs: 1000, // after a jump, ignore swipes for a while (e.g. the hand coming back)
+  poseMs: 300, // the open hand must be held for the whole swipe, not only in the last frame
+};
+
+/** State of the swipe gesture. */
+const swipe = {
+  lastFired: -Infinity, // time of the last jump
+  poseSince: null, // since when the open hand has been seen without interruption
+};
+
 /** Hold-to-trigger state of each static gesture. */
 const holds = {
   activation: new HoldGesture(),
@@ -270,14 +291,49 @@ function recognizeGestures(result) {
   if (!active) {
     // The remote is idle: ignore every command and forget any hold in progress
     holds.fist.reset();
+    swipe.poseSince = null;
     return;
   }
 
   updateFist(now, measures.Right);
+  updateSwipe(now, measures.Right);
 
-  // TODO: forward/backward, volume and our two own gestures. Call keepActive() after each
-  // accepted command. For example:
-  //   const { dx } = trackers.Right.displacement(); if (dx > 1) → right hand moving right
+  // TODO: volume and our two own gestures. Call keepActive() after each accepted command.
+}
+
+/**
+ * Forward / backward gesture: a sideways swipe of the open right hand jumps SWIPE.seekSeconds
+ * forward (to the right on screen) or backward (to the left). Without defences, any frame with
+ * the open hand and enough sideways movement fires. With defences: a cooldown after each jump,
+ * so the hand coming back does not jump the other way, and the open hand must have been held
+ * for the whole swipe (SWIPE.poseMs).
+ * @param {number} now Current time in milliseconds (performance.now()).
+ * @param {object | null} m Output of measureHand() for the right hand, or null if missing.
+ * @returns {void}
+ */
+function updateSwipe(now, m) {
+  const defended = settings.defenses;
+  const openHand = m !== null && m.longFingers === 4 && m.up > SWIPE.upMin;
+  if (!openHand) {
+    swipe.poseSince = null;
+    return;
+  }
+  swipe.poseSince ??= now;
+  if (player.hidden) return; // the video is closed: nothing to move
+
+  if (defended) {
+    if (now - swipe.lastFired < SWIPE.cooldownMs) return; // cooldown
+    if (now - swipe.poseSince < SWIPE.poseMs) return; // hand not open long enough
+  }
+
+  const { dx, dy } = trackers.Right.displacement();
+  const sideways = Math.abs(dx) >= SWIPE.minDx && Math.abs(dx) >= SWIPE.dominance * Math.abs(dy);
+  if (!sideways) return;
+
+  seek(Math.sign(dx) * SWIPE.seekSeconds); // dx > 0: to the right on screen → forward
+  swipe.lastFired = now;
+  trackers.Right.clear(); // the same movement must not fire again on the next frame
+  keepActive(now);
 }
 
 /**
@@ -351,8 +407,9 @@ function updateActivation(now, measures) {
     graceMs: settings.defenses ? ACTIVATION.graceMs : 0,
   });
   if (fired) {
+    // Already active (e.g. the hand stops after a swipe): just renew, without logging it again
+    if (now >= remote.activeUntil) logAction("activar mando", `${ACTIVATION.activeMs / 1000} s`);
     remote.activeUntil = now + ACTIVATION.activeMs;
-    logAction("activar mando", `${ACTIVATION.activeMs / 1000} s`);
   }
 
   const active = now < remote.activeUntil;
@@ -385,6 +442,8 @@ function keepActive(now = performance.now()) {
 function resetRemote() {
   remote.activeUntil = 0;
   for (const hold of Object.values(holds)) hold.reset();
+  swipe.lastFired = -Infinity;
+  swipe.poseSince = null;
 }
 
 /**
