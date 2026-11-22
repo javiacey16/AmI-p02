@@ -1,0 +1,116 @@
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  font-family: system-ui, helvetica, arial, sans-serif;
+  margin: 0;
+  padding: 1rem;
+}
+
+main {
+  max-width: 1300px;
+  margin: 0 auto;
+}
+
+h1 {
+  font-style: italic;
+  color: #c43e00; /* naranja más oscuro: #ff6f00 no tiene contraste suficiente sobre blanco */
+}
+
+@media (prefers-color-scheme: dark) {
+  h1 {
+    color: #ff8f3a;
+  }
+}
+
+#status {
+  white-space: pre-line;
+  font-family: ui-monospace, monospace;
+}
+
+button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}
+
+/* Cámara y reproductor, uno al lado del otro en pantallas anchas */
+.layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+#player {
+  width: 100%;
+  background: #000;
+}
+
+/* Estado del mando: cambia de aspecto cuando está activado */
+.mode {
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  background: #444;
+  color: #eee;
+  font-weight: bold;
+}
+
+.mode.active {
+  background: #2e7d32;
+  color: #fff;
+}
+
+#log {
+  border-collapse: collapse;
+  font-family: ui-monospace, monospace;
+}
+
+#log th,
+#log td {
+  border: 1px solid #888;
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+}
+
+/* Vídeo y canvas superpuestos: nunca más anchos que la pantalla ni que 640 px */
+.camView {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  margin: 1rem 0;
+  /* Efecto espejo, más natural con la cámara frontal.
+     No afecta a los datos: izquierda/derecha siguen siendo las de la persona. */
+  transform: scaleX(-1);
+}
+
+/* height: auto mantiene la proporción real de la cámara (también en vertical en el móvil) */
+.camView video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.camView canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+#results {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+
+#results dt {
+  font-weight: bold;
+}
+
+#results dd {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+}

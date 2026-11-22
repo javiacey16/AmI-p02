@@ -129,7 +129,7 @@ function drawResults(result) {
 }
 
 // 6. De los puntos a una acción: encender y apagar la lámpara con una pinza
-const PINCH_THRESHOLD = 0.2; // por debajo de este valor hay pinza (calíbralo mirando el panel)
+const PINCH_THRESHOLD = 0.4; // por debajo de este valor hay pinza (calíbralo mirando el panel)
 let wasPinching = false;
 let lampOn = false;
 let activations = 0;

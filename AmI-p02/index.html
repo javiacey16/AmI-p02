@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>P2: el mando gestual del salón</title>
+    <link rel="stylesheet" href="style.css" />
+    <!-- MediaPipe no necesita etiquetas <script> aquí: index.js lo importa como módulo ES -->
+  </head>
+  <body>
+    <main>
+      <h1>El mando gestual del salón</h1>
+      <p id="status" role="status">Cargando MediaPipe…</p>
+
+      <button id="btnCamera" type="button" disabled>Activar cámara</button>
+
+      <div class="layout">
+        <section aria-label="Cámara">
+          <!-- El vídeo y el canvas se superponen; el canvas dibuja los puntos de las manos.
+               playsinline es necesario en iOS Safari. -->
+          <div class="camView">
+            <video id="webcam" autoplay muted playsinline></video>
+            <canvas id="overlay"></canvas>
+          </div>
+        </section>
+
+        <section aria-label="Televisión">
+          <!-- Pon tu vídeo en la carpeta con el nombre video.mp4 (o cambia el src) -->
+          <video id="player" src="video.mp4" controls playsinline loop></video>
+          <!-- aria-live: los lectores de pantalla anuncian si el mando está activado -->
+          <p id="mode" class="mode" aria-live="polite">Mando en reposo</p>
+        </section>
+      </div>
+
+      <h2>Resultados</h2>
+      <dl id="results">
+        <dt>Manos detectadas</dt><dd id="numHands">–</dd>
+        <dt>Mano izquierda</dt><dd id="leftHand">–</dd>
+        <dt>Mano derecha</dt><dd id="rightHand">–</dd>
+        <dt>Fotogramas por segundo</dt><dd id="fps">–</dd>
+      </dl>
+
+      <h2>Registro de acciones</h2>
+      <p>Cada acción sobre el reproductor queda registrada. Úsalo en la evaluación para contar aciertos y activaciones involuntarias.</p>
+      <button id="btnDownload" type="button">Descargar CSV</button>
+      <button id="btnClear" type="button">Borrar registro</button>
+      <table id="log">
+        <thead>
+          <tr><th>Tiempo (s)</th><th>Acción</th><th>Detalle</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </main>
+
+    <script type="module" src="index.js"></script>
+  </body>
+</html>
