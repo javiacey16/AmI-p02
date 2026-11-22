@@ -184,6 +184,40 @@ const trackers = {
 };
 
 /**
+ * What is switched on. Changed with the toggle buttons on the page, so the same code can be
+ * measured with and without each part.
+ */
+const settings = {
+  activation: true, // commands are only accepted for a while after the activation gesture
+  defenses: false, // Midas touch defences
+};
+
+/**
+ * Activation gesture: right hand open (4 long fingers extended), palm towards the camera,
+ * fingers up and STILL for `holdMs`. Being still is what tells it apart from forward/backward,
+ * which uses the same open hand but moving. CALIBRATE these values with the measures panel.
+ */
+const ACTIVATION = {
+  holdMs: 1000, // how long the pose must be held
+  activeMs: 5000, // how long the remote stays active (renewed by every accepted command)
+  palmMin: 0.5, // palm towards the camera (palm measure, −1…+1)
+  upMin: 0.6, // fingers pointing up (up measure, −1…+1)
+  maxMotion: 0.5, // max wrist displacement, in hand sizes per 0.5 s, to count as still
+  // Defences (only when settings.defenses is on):
+  keepFingers: 3, // hysteresis: once holding, 3 extended long fingers are enough to keep holding
+  keepPalm: 0.3, // hysteresis: looser palm threshold to keep holding
+  graceMs: 200, // tolerance: short detection drops do not restart the hold
+};
+
+/** State of the remote: until when it is active and how the activation hold is going. */
+const remote = {
+  activeUntil: 0, // performance.now() time when the active period ends
+  holdStart: null, // when the current activation hold started (null = not holding)
+  lastSeen: 0, // last time the activation pose was seen
+  needsRelease: false, // after activating, the hand must leave the pose before activating again
+};
+
+/**
  * Recognises the gestures and triggers the player actions. Called once per frame.
  * The result holds, for each hand i:
  *   result.handedness[i][0].categoryName → "Left" or "Right" (the person's hand)
@@ -212,11 +246,102 @@ function recognizeGestures(result) {
   }
   showMeasures(measures);
 
-  // TODO: activation gesture, the three study gestures, our two own gestures
-  // and the defences against the Midas touch problem. For example:
+  const active = updateActivation(now, measures);
+  if (!active) return; // the remote is idle: ignore every command
+
+  // TODO: the three study gestures and our two own gestures. Call keepActive() after each
+  // accepted command. For example:
   //   const r = measures.Right;
   //   if (r && r.longFingers === 0) → fist
   //   const { dx } = trackers.Right.displacement(); if (dx > 1) → right hand moving right
+}
+
+/**
+ * Checks whether a hand is in the activation pose: open, palm towards the camera, fingers up
+ * and still. With defences on, an ongoing hold uses looser thresholds (hysteresis).
+ * @param {object | null} m Output of measureHand() for the right hand, or null if missing.
+ * @param {MotionTracker} tracker Motion tracker of the same hand.
+ * @param {boolean} holding Whether an activation hold is already in progress.
+ * @returns {boolean} true if the pose is detected in this frame.
+ */
+function isActivationPose(m, tracker, holding) {
+  if (!m) return false;
+  const loose = holding && settings.defenses;
+  const { dx, dy } = tracker.displacement();
+  const fingersOpen = loose ? m.longFingers >= ACTIVATION.keepFingers : m.longFingers === 4;
+  const palmToCamera = m.palm > (loose ? ACTIVATION.keepPalm : ACTIVATION.palmMin);
+  const fingersUp = m.up > ACTIVATION.upMin;
+  const still = Math.abs(dx) < ACTIVATION.maxMotion && Math.abs(dy) < ACTIVATION.maxMotion;
+  return fingersOpen && palmToCamera && fingersUp && still;
+}
+
+/**
+ * Runs the activation gesture for this frame and shows the state of the remote.
+ * Holding the pose for ACTIVATION.holdMs activates the remote for ACTIVATION.activeMs.
+ * With defences on: hysteresis and a short grace period while holding, and progress feedback.
+ * @param {number} now Current time in milliseconds (performance.now()).
+ * @param {{Right: object | null, Left: object | null}} measures Output of measureHand() per hand.
+ * @returns {boolean} true if the remote accepts commands in this frame.
+ */
+function updateActivation(now, measures) {
+  if (!settings.activation) {
+    setMode("Mando siempre activo (gesto de activación desactivado)", true);
+    return true;
+  }
+
+  const holding = remote.holdStart !== null;
+  if (isActivationPose(measures.Right, trackers.Right, holding)) {
+    remote.lastSeen = now;
+    if (!remote.needsRelease) {
+      remote.holdStart ??= now;
+      if (now - remote.holdStart >= ACTIVATION.holdMs) {
+        remote.activeUntil = now + ACTIVATION.activeMs;
+        remote.holdStart = null;
+        remote.needsRelease = true; // keeping the hand up does not re-activate every second
+        logAction("activar mando", `${ACTIVATION.activeMs / 1000} s`);
+      }
+    }
+  } else {
+    // Without defences, a single missed frame restarts the hold
+    const grace = settings.defenses ? ACTIVATION.graceMs : 0;
+    if (now - remote.lastSeen > grace) {
+      remote.holdStart = null;
+      remote.needsRelease = false;
+    }
+  }
+
+  const active = now < remote.activeUntil;
+  if (active) {
+    const left = Math.ceil((remote.activeUntil - now) / 1000);
+    setMode(`Mando activado: ${left} s`, true);
+  } else if (remote.holdStart !== null && settings.defenses) {
+    // Feedback (defence): the person sees it is about to activate and can abort
+    const progress = Math.min(100, Math.round(((now - remote.holdStart) / ACTIVATION.holdMs) * 100));
+    setMode(`Activando… ${progress} %`, false, true);
+  } else {
+    setMode("Mando en reposo · mano derecha abierta y quieta 1 s para activar", false);
+  }
+  return active;
+}
+
+/**
+ * Renews the active period. Call it after every accepted command, so the remote stays active
+ * while the person keeps using it.
+ * @param {number} [now=performance.now()] Current time in milliseconds.
+ * @returns {void}
+ */
+function keepActive(now = performance.now()) {
+  if (settings.activation) remote.activeUntil = now + ACTIVATION.activeMs;
+}
+
+/**
+ * Puts the remote back to idle (used when the settings change).
+ * @returns {void}
+ */
+function resetRemote() {
+  remote.activeUntil = 0;
+  remote.holdStart = null;
+  remote.needsRelease = false;
 }
 
 /**
@@ -263,12 +388,40 @@ function findHand(result, name) {
  * Shows the state of the remote (e.g. "Mando activado: 3 s").
  * @param {string} text Text to show.
  * @param {boolean} active Whether the remote is active (changes the style).
+ * @param {boolean} [pending=false] Whether it is about to activate (changes the style).
  * @returns {void}
  */
-function setMode(text, active) {
+function setMode(text, active, pending = false) {
   setText("mode", text);
   modeEl.classList.toggle("active", Boolean(active));
+  modeEl.classList.toggle("pending", Boolean(pending));
 }
+
+/**
+ * Connects a toggle button to a key of `settings`: each click switches it, updates the button,
+ * logs the change (so the CSV shows which version was being measured) and resets the remote.
+ * @param {string} id Id of the button.
+ * @param {keyof typeof settings} key Setting the button switches.
+ * @param {string} label Text of the button, before ": sí" / ": no".
+ * @returns {void}
+ */
+function setupToggle(id, key, label) {
+  const button = document.getElementById(id);
+  const render = () => {
+    button.setAttribute("aria-pressed", String(settings[key]));
+    button.textContent = `${label}: ${settings[key] ? "sí" : "no"}`;
+  };
+  button.addEventListener("click", () => {
+    settings[key] = !settings[key];
+    render();
+    resetRemote();
+    logAction("configuración", `${label.toLowerCase()}: ${settings[key] ? "sí" : "no"}`);
+  });
+  render();
+}
+
+setupToggle("btnActivation", "activation", "Gesto de activación");
+setupToggle("btnDefenses", "defenses", "Defensas");
 
 // 7. Actions on the player (already implemented; each one is logged)
 

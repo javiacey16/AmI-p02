@@ -29,6 +29,11 @@
           <video id="player" src="video.mp4" controls playsinline loop></video>
           <!-- aria-live: los lectores de pantalla anuncian si el mando está activado -->
           <p id="mode" class="mode" aria-live="polite">Mando en reposo</p>
+          <!-- Interruptores para medir la misma versión con y sin cada parte; cada cambio queda en el registro -->
+          <div class="toggles" role="group" aria-label="Configuración del mando">
+            <button id="btnActivation" type="button" aria-pressed="true">Gesto de activación: sí</button>
+            <button id="btnDefenses" type="button" aria-pressed="false">Defensas: no</button>
+          </div>
         </section>
       </div>
 

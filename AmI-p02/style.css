@@ -62,6 +62,25 @@ button {
   color: #fff;
 }
 
+/* A punto de activarse (retroalimentación, solo con las defensas) */
+.mode.pending {
+  background: #f9a825;
+  color: #000;
+}
+
+/* Interruptores de configuración: resaltados cuando están en «sí» */
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.toggles button[aria-pressed="true"] {
+  background: #2e7d32;
+  border-color: #2e7d32;
+  color: #fff;
+}
+
 #log {
   border-collapse: collapse;
   font-family: ui-monospace, monospace;
