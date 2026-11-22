@@ -140,6 +140,36 @@ export function fingerRatios(points) {
 }
 
 /**
+ * How far each long fingertip is from the base of its finger (MCP), relative to the hand size.
+ * It tells a real fist apart from a half-closed hand: in a tight fist the tip touches the palm
+ * next to the knuckle; in a half-closed hand (fingers curled like a claw) it stays far.
+ * Approximate values: tight fist ≈ 0.2–0.4 · half-closed ≈ 0.5–0.8 · extended ≈ 0.8–1.0.
+ * @param {Landmarks} points The 21 points of one hand (worldLandmarks recommended).
+ * @returns {{index: number, middle: number, ring: number, pinky: number}} One value per long
+ *   finger: dist(tip, MCP) / handSize.
+ */
+export function tipToBase(points) {
+  const size = handSize(points);
+  const ratio = (tip, mcp) => distance(points[tip], points[mcp]) / size;
+  return {
+    index: ratio(LM.INDEX_TIP, LM.INDEX_MCP),
+    middle: ratio(LM.MIDDLE_TIP, LM.MIDDLE_MCP),
+    ring: ratio(LM.RING_TIP, LM.RING_MCP),
+    pinky: ratio(LM.PINKY_TIP, LM.PINKY_MCP),
+  };
+}
+
+/**
+ * Largest value among the four long fingers (the most open one).
+ * @param {{index: number, middle: number, ring: number, pinky: number}} values Per-finger values,
+ *   e.g. from fingerRatios() or tipToBase().
+ * @returns {number} max(index, middle, ring, pinky).
+ */
+export function maxLongFinger(values) {
+  return Math.max(values.index, values.middle, values.ring, values.pinky);
+}
+
+/**
  * Turns finger ratios into extended / bent states.
  * @param {FingerRatios} ratios Output of fingerRatios().
  * @param {typeof THRESHOLDS} [thresholds=THRESHOLDS] Thresholds to compare against.
@@ -292,6 +322,70 @@ export class MotionTracker {
   }
 }
 
+// ---------- Static gestures: hold to trigger ----------
+
+/**
+ * Turns a per-frame "pose detected?" signal into a single trigger. The pose has to be held for
+ * `holdMs`; then it fires ONCE and does not fire again until the pose is released. Short gaps
+ * of up to `graceMs` without the pose do not restart the hold.
+ *
+ * With holdMs = 0 and graceMs = 0 it fires on the first frame of the pose (the naive version).
+ */
+export class HoldGesture {
+  constructor() {
+    this.reset();
+  }
+
+  /**
+   * Forgets any hold in progress (e.g. when the remote goes idle).
+   * @returns {void}
+   */
+  reset() {
+    this.start = null; // when the current hold started (null = not holding)
+    this.lastSeen = -Infinity; // last time the pose was detected
+    this.needsRelease = false; // already fired: wait until the pose is released
+  }
+
+  /**
+   * Whether a hold is in progress.
+   * @returns {boolean} true between the first frame of the pose and the trigger.
+   */
+  get holding() {
+    return this.start !== null;
+  }
+
+  /**
+   * Feeds one frame.
+   * @param {number} now Current time in milliseconds (performance.now()).
+   * @param {boolean} detected Whether the pose is detected in this frame.
+   * @param {object} [options]
+   * @param {number} [options.holdMs=0] How long the pose must be held before firing.
+   * @param {number} [options.graceMs=0] How long the pose may be missing without restarting.
+   * @returns {{fired: boolean, progress: number}} fired is true only on the frame that triggers;
+   *   progress goes from 0 to 1 while holding.
+   */
+  update(now, detected, { holdMs = 0, graceMs = 0 } = {}) {
+    if (detected) {
+      this.lastSeen = now;
+      if (this.needsRelease) return { fired: false, progress: 0 };
+      this.start ??= now;
+      const progress = holdMs > 0 ? Math.min(1, (now - this.start) / holdMs) : 1;
+      if (progress >= 1) {
+        this.start = null;
+        this.needsRelease = true;
+        return { fired: true, progress: 1 };
+      }
+      return { fired: false, progress };
+    }
+    if (now - this.lastSeen > graceMs) {
+      this.start = null;
+      this.needsRelease = false;
+    }
+    const progress = this.holding && holdMs > 0 ? Math.min(1, (now - this.start) / holdMs) : 0;
+    return { fired: false, progress };
+  }
+}
+
 // ---------- All together ----------
 
 /**
@@ -300,9 +394,10 @@ export class MotionTracker {
  * @param {{landmarks: Landmarks, world: Landmarks}} hand A hand as returned by findHand().
  * @param {HandName} handName Which hand it is.
  * @param {typeof THRESHOLDS} [thresholds=THRESHOLDS] Thresholds for the finger states.
- * @returns {{size: number, ratios: FingerRatios, fingers: FingerStates, longFingers: number,
- *   palm: number, up: number}} Hand size (m), finger ratios and states, number of extended long
- *   fingers, palm towards camera (−1…+1) and fingers up (−1…+1).
+ * @returns {{size: number, ratios: FingerRatios, tips: object, fingers: FingerStates,
+ *   longFingers: number, palm: number, up: number}} Hand size (m), finger ratios, tip-to-base
+ *   distances, finger states, number of extended long fingers, palm towards camera (−1…+1) and
+ *   fingers up (−1…+1).
  */
 export function measureHand(hand, handName, thresholds = THRESHOLDS) {
   const ratios = fingerRatios(hand.world);
@@ -310,6 +405,7 @@ export function measureHand(hand, handName, thresholds = THRESHOLDS) {
   return {
     size: handSize(hand.world),
     ratios,
+    tips: tipToBase(hand.world),
     fingers,
     longFingers: countLongFingers(fingers),
     palm: palmFacingCamera(hand.world, handName),
