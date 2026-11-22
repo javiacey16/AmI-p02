@@ -1,16 +1,18 @@
-// P2 · El mando gestual del salón (plantilla)
-// Cámara → HandLandmarker (21 puntos por mano) → VUESTROS GESTOS → acciones sobre el reproductor
-// Lo que tenéis que programar está en la sección 6, recognizeGestures()
+// P2 · The living-room gesture remote
+// Camera → HandLandmarker (21 points per hand) → OUR GESTURES → actions on the video player
+// The gesture logic goes in section 6, recognizeGestures()
 
-// 1. Importar los elementos necesarios para la tarea.
-// Versión fijada (nunca @latest): el .mjs y los ficheros .wasm deben ser de la misma versión
+// 1. Import what the task needs.
+// Pinned version (never @latest): the .mjs and the .wasm files must be the same version
 import {
   FilesetResolver,
   HandLandmarker,
   DrawingUtils,
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.2/vision_bundle.mjs";
+// Reusable gesture helpers (finger, palm and motion measures)
+import { FINGER_NAMES, MotionTracker, measureHand } from "./gestures.js";
 
-const MEDIAPIPE_VERSION = "1.2.2"; // la misma que en el import de arriba
+const MEDIAPIPE_VERSION = "1.2.2"; // same as in the import above
 const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
 const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
@@ -31,16 +33,31 @@ let lastVideoTime = -1;
 let frames = 0;
 let fpsStart = performance.now();
 
+/**
+ * Shows a status message on the page and in the console.
+ * @param {string} message Text to show.
+ * @returns {void}
+ */
 function show(message) {
   statusEl.textContent = message;
   console.log(message);
 }
 
+/**
+ * Sets the text of an element, touching the DOM only if the text changes.
+ * @param {string} id Id of the element.
+ * @param {string} text New text.
+ * @returns {void}
+ */
 function setText(id, text) {
   const el = document.getElementById(id);
-  if (el.textContent !== text) el.textContent = text; // solo tocamos el DOM si cambia
+  if (el.textContent !== text) el.textContent = text;
 }
 
+/**
+ * Summarises the environment: MediaPipe version, delegate, secure context and WebGPU.
+ * @returns {string} One line per item, ready for show().
+ */
 function environmentReport() {
   const yesNo = (value) => (value ? "sí" : "no");
   return [
@@ -50,8 +67,13 @@ function environmentReport() {
   ].join("\n");
 }
 
-// 2. Crear la tarea (con GPU si se puede; si no, CPU).
-// Para comparar, añade ?delegate=cpu a la URL
+// 2. Create the task
+/**
+ * Creates the HandLandmarker task (up to 2 hands, VIDEO mode), trying the GPU first and then
+ * the CPU. Add ?delegate=cpu to the URL to force the CPU.
+ * @returns {Promise<void>} Resolves when the task is ready; sets `handLandmarker` and `delegate`.
+ * @throws {Error} If the task cannot be created with any delegate.
+ */
 async function createHandLandmarker() {
   const vision = await FilesetResolver.forVisionTasks(WASM_URL);
   const options = {
@@ -74,7 +96,12 @@ async function createHandLandmarker() {
   throw new Error("No se pudo crear HandLandmarker");
 }
 
-// Activar la cámara web y ajustar el canvas a su resolución real
+/**
+ * Turns on the front camera (ideally 640×480) and sizes the canvas and the motion trackers
+ * to its real resolution.
+ * @returns {Promise<void>} Resolves when the camera is playing.
+ * @throws {Error} If the camera is not available (e.g. the page is not served over HTTPS).
+ */
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("La cámara no está disponible (¿se sirve la página por HTTPS?)");
@@ -89,11 +116,18 @@ async function startCamera() {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   drawingUtils = new DrawingUtils(ctx);
+  // Landmark x and y are normalised by width and height: the trackers need the aspect ratio
+  for (const tracker of Object.values(trackers)) tracker.aspect = video.videoWidth / video.videoHeight;
 }
 
-// 3. Ejecutar la tarea en cada fotograma nuevo
+// 3. Run the task on every new frame
+/**
+ * Main loop: runs the model on each new camera frame, then draws, shows results and
+ * recognises gestures. Schedules itself with requestAnimationFrame.
+ * @returns {void}
+ */
 function predictWebcam() {
-  // detectForVideo necesita marcas de tiempo crecientes: solo procesamos fotogramas nuevos
+  // detectForVideo needs increasing timestamps: only process new frames
   if (video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
     const result = handLandmarker.detectForVideo(video, performance.now());
@@ -105,13 +139,18 @@ function predictWebcam() {
   requestAnimationFrame(predictWebcam);
 }
 
-// 4. Entender los resultados: tres listas paralelas, una entrada por mano detectada
+// 4. Understand the results: three parallel lists, one entry per detected hand
+/**
+ * Shows how many hands there are and, for each, its handedness confidence and wrist position.
+ * @param {object} result HandLandmarkerResult of the current frame.
+ * @returns {void}
+ */
 function showResults(result) {
   setText("numHands", String(result.landmarks.length));
   const text = { Left: "–", Right: "–" };
   result.handedness.forEach((categories, i) => {
-    const { categoryName, score } = categories[0]; // "Left" o "Right": la mano de la persona
-    const wrist = result.landmarks[i][0]; // punto 0: muñeca, coordenadas normalizadas
+    const { categoryName, score } = categories[0]; // "Left" or "Right": the person's hand
+    const wrist = result.landmarks[i][0]; // point 0: wrist, normalised coordinates
     const where = `(${wrist.x.toFixed(2)}, ${wrist.y.toFixed(2)})`;
     text[categoryName] = Math.round(score * 100) + " % · muñeca en " + where;
   });
@@ -119,7 +158,12 @@ function showResults(result) {
   setText("rightHand", text.Right);
 }
 
-// 5. Utilizar los resultados: dibujar las conexiones entre articulaciones y un círculo en cada punto
+// 5. Use the results
+/**
+ * Draws each hand on the canvas: the connections between joints and a circle per landmark.
+ * @param {object} result HandLandmarkerResult of the current frame.
+ * @returns {void}
+ */
 function drawResults(result) {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   for (const landmarks of result.landmarks) {
@@ -131,73 +175,173 @@ function drawResults(result) {
   }
 }
 
-// 6. VUESTRO TRABAJO: de los puntos a los gestos
-// Se llama una vez por fotograma con el resultado de HandLandmarker:
-//   result.handedness[i][0].categoryName → "Left" o "Right" (la mano de la persona)
-//   result.landmarks[i]      → 21 puntos, x e y normalizadas (0–1) en la imagen
-//   result.worldLandmarks[i] → los mismos 21 puntos en metros
-// Usad las acciones de la sección 7 (seek, changeVolume, closePlayer, togglePause,
-// toggleMute) y setMode() para mostrar si el mando está activado.
+// 6. OUR WORK: from landmarks to gestures
+
+/** Wrist motion of each hand over the last half second (dynamic gestures). */
+const trackers = {
+  Right: new MotionTracker({ windowMs: 500 }),
+  Left: new MotionTracker({ windowMs: 500 }),
+};
+
+/**
+ * Recognises the gestures and triggers the player actions. Called once per frame.
+ * The result holds, for each hand i:
+ *   result.handedness[i][0].categoryName → "Left" or "Right" (the person's hand)
+ *   result.landmarks[i]      → 21 points, x and y normalised (0–1) in the image
+ *   result.worldLandmarks[i] → the same 21 points in metres
+ * Use the section 7 actions (seek, changeVolume, closePlayer, togglePause, toggleMute) and
+ * setMode() to show whether the remote is active.
+ * @param {object} result HandLandmarkerResult of the current frame.
+ * @returns {void}
+ */
 function recognizeGestures(result) {
+  const now = performance.now();
   const right = findHand(result, "Right");
   const left = findHand(result, "Left");
-  // TODO: gesto de activación, los tres gestos del estudio, vuestros dos gestos
-  // y las defensas contra el problema de Midas
+
+  // Measures of each hand (null if missing) and tracking of its motion
+  const measures = {};
+  for (const [name, hand] of [["Right", right], ["Left", left]]) {
+    if (hand) {
+      measures[name] = measureHand(hand, name);
+      trackers[name].push(now, hand.landmarks);
+    } else {
+      measures[name] = null;
+      trackers[name].clear(); // if the hand is lost, motion starts again from zero
+    }
+  }
+  showMeasures(measures);
+
+  // TODO: activation gesture, the three study gestures, our two own gestures
+  // and the defences against the Midas touch problem. For example:
+  //   const r = measures.Right;
+  //   if (r && r.longFingers === 0) → fist
+  //   const { dx } = trackers.Right.displacement(); if (dx > 1) → right hand moving right
 }
 
-// Devuelve { landmarks, world } de la mano pedida ("Left" o "Right"), o null si no está
+/**
+ * Calibration panel: shows the measures of each hand so the thresholds can be chosen.
+ * @param {{Right: object | null, Left: object | null}} measures Output of measureHand() per hand,
+ *   or null when the hand is not detected.
+ * @returns {void}
+ */
+function showMeasures(measures) {
+  const mark = (on) => (on ? "▲" : "·"); // ▲ extended, · bent
+  for (const [name, id] of [["Right", "measureRight"], ["Left", "measureLeft"]]) {
+    const m = measures[name];
+    if (!m) {
+      setText(id, "–");
+      continue;
+    }
+    const { dx, dy } = trackers[name].displacement();
+    setText(
+      id,
+      [
+        `dedos      ${FINGER_NAMES.map((f) => mark(m.fingers[f])).join(" ")}   (pulgar índice corazón anular meñique)`,
+        `ratios     ${FINGER_NAMES.map((f) => m.ratios[f].toFixed(2)).join("  ")}`,
+        `palma      ${m.palm.toFixed(2)}   (+1 hacia la cámara, −1 de espaldas)`,
+        `arriba     ${m.up.toFixed(2)}   (+1 dedos hacia arriba)`,
+        `movimiento dx ${dx.toFixed(2)}  dy ${dy.toFixed(2)}   (manos/0,5 s, derecha y arriba en pantalla)`,
+      ].join("\n"),
+    );
+  }
+}
+
+/**
+ * Finds one hand in the result.
+ * @param {object} result HandLandmarkerResult of the current frame.
+ * @param {"Left" | "Right"} name The person's hand to look for.
+ * @returns {{landmarks: object[], world: object[]} | null} Its image and world landmarks,
+ *   or null if that hand is not detected.
+ */
 function findHand(result, name) {
   const i = result.handedness.findIndex((categories) => categories[0].categoryName === name);
   return i < 0 ? null : { landmarks: result.landmarks[i], world: result.worldLandmarks[i] };
 }
 
-// Distancia entre dos puntos 3D
-function distance(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-// Muestra el estado del mando (por ejemplo, "Mando activado: 3 s")
+/**
+ * Shows the state of the remote (e.g. "Mando activado: 3 s").
+ * @param {string} text Text to show.
+ * @param {boolean} active Whether the remote is active (changes the style).
+ * @returns {void}
+ */
 function setMode(text, active) {
   setText("mode", text);
   modeEl.classList.toggle("active", Boolean(active));
 }
 
-// 7. Acciones sobre el reproductor (ya implementadas; cada una queda en el registro)
+// 7. Actions on the player (already implemented; each one is logged)
+
+/**
+ * Limits a value to a range.
+ * @param {number} value Value to limit.
+ * @param {number} min Lower bound.
+ * @param {number} max Upper bound.
+ * @returns {number} value, clamped to [min, max].
+ */
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+/**
+ * Jumps forwards or backwards in the video and logs it.
+ * @param {number} seconds Seconds to move: positive forwards, negative backwards.
+ * @returns {void}
+ */
 function seek(seconds) {
-  const end = Number.isFinite(player.duration) ? player.duration : Infinity; // aún sin cargar
+  const end = Number.isFinite(player.duration) ? player.duration : Infinity; // not loaded yet
   player.currentTime = clamp(player.currentTime + seconds, 0, end);
   logAction(seconds > 0 ? "avanzar" : "retroceder", `${seconds} s → ${player.currentTime.toFixed(1)} s`);
 }
 
+/**
+ * Changes the volume and logs it.
+ * @param {number} delta Volume change (the volume goes from 0 to 1): positive up, negative down.
+ * @returns {void}
+ */
 function changeVolume(delta) {
   player.volume = clamp(player.volume + delta, 0, 1);
   logAction(delta > 0 ? "subir volumen" : "bajar volumen", `volumen ${player.volume.toFixed(2)}`);
 }
 
+/**
+ * Stops and hides the player, and logs it.
+ * @returns {void}
+ */
 function closePlayer() {
   player.pause();
   player.hidden = true;
   logAction("cerrar", "");
 }
 
+/**
+ * Pauses the video if it is playing, or resumes it if paused, and logs it.
+ * @returns {void}
+ */
 function togglePause() {
   if (player.paused) player.play();
   else player.pause();
   logAction(player.paused ? "pausar" : "reanudar", "");
 }
 
+/**
+ * Mutes or unmutes the video and logs it.
+ * @returns {void}
+ */
 function toggleMute() {
   player.muted = !player.muted;
   logAction(player.muted ? "silenciar" : "quitar silencio", "");
 }
 
-// Registro de acciones: tiempo desde que se cargó la página, acción y detalle
+/** Action log: rows of [seconds since page load, action, detail]. */
 const logRows = [];
 
+/**
+ * Adds an action to the log and to the table on the page (newest first).
+ * @param {string} action Name of the action (e.g. "avanzar").
+ * @param {string} detail Extra information (e.g. the new time or volume).
+ * @returns {void}
+ */
 function logAction(action, detail) {
   const row = [(performance.now() / 1000).toFixed(2), action, detail];
   logRows.push(row);
@@ -207,9 +351,13 @@ function logAction(action, detail) {
     td.textContent = value;
     tr.append(td);
   }
-  logBody.prepend(tr); // la acción más reciente, arriba
+  logBody.prepend(tr); // newest action on top
 }
 
+/**
+ * Downloads the action log as a CSV file (registro-acciones.csv).
+ * @returns {void}
+ */
 function downloadLog() {
   const quote = (value) => `"${String(value).replaceAll('"', '""')}"`;
   const lines = [["tiempo_s", "accion", "detalle"], ...logRows].map((row) => row.map(quote).join(","));
@@ -227,6 +375,10 @@ document.querySelector("#btnClear").addEventListener("click", () => {
   logBody.replaceChildren();
 });
 
+/**
+ * Counts processed frames and updates the frames-per-second value once per second.
+ * @returns {void}
+ */
 function countFrame() {
   frames++;
   const elapsed = performance.now() - fpsStart;
@@ -237,6 +389,11 @@ function countFrame() {
   }
 }
 
+/**
+ * Starts the app: creates the task, shows the environment report and enables the camera
+ * button (the camera starts on click, since some browsers require a user gesture).
+ * @returns {Promise<void>} Resolves when the button is ready.
+ */
 async function app() {
   await createHandLandmarker();
   show(environmentReport());

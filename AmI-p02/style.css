@@ -114,3 +114,15 @@ button {
   margin: 0;
   font-family: ui-monospace, monospace;
 }
+
+/* Panel de calibración: varias líneas por mano, columnas alineadas */
+#measures dt {
+  font-weight: bold;
+}
+
+#measures dd {
+  margin: 0 0 0.75rem;
+  font-family: ui-monospace, monospace;
+  white-space: pre;
+  overflow-x: auto;
+}
