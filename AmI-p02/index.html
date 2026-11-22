@@ -3,67 +3,110 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>P2: el mando gestual del salón</title>
+    <title>Mando gestual del salón - MediaPipe</title>
     <link rel="stylesheet" href="style.css" />
     <!-- MediaPipe no necesita etiquetas <script> aquí: index.js lo importa como módulo ES -->
   </head>
   <body>
-    <main>
-      <h1>El mando gestual del salón</h1>
+    <header class="topbar">
+      <div>
+        <h1>Mando gestual del salón</h1>
+        <p class="subtitle">Control del vídeo con gestos de las manos con MediaPipe Hand Landmarker</p>
+      </div>
       <p id="status" role="status">Cargando MediaPipe…</p>
+    </header>
 
-      <button id="btnCamera" type="button" disabled>Activar cámara</button>
+    <main class="layout">
+      <!-- Interruptores para medir la misma versión con y sin cada parte; cada cambio queda en el registro -->
+      <div class="card controls" role="group" aria-label="Configuración del mando">
+        <button id="btnCamera" type="button" disabled>Activar cámara</button>
+        <button id="btnActivation" class="toggle" type="button" aria-pressed="true">Gesto de activación: sí</button>
+        <button id="btnDefenses" class="toggle" type="button" aria-pressed="false">Defensas: no</button>
+        <!-- Para repetir los intentos del gesto de cerrar durante la evaluación -->
+        <button id="btnReopen" class="secondary" type="button">Reabrir el vídeo</button>
+      </div>
 
-      <div class="layout">
-        <section aria-label="Cámara">
-          <!-- El vídeo y el canvas se superponen; el canvas dibuja los puntos de las manos.
-               playsinline es necesario en iOS Safari. -->
-          <div class="camView">
-            <video id="webcam" autoplay muted playsinline></video>
-            <canvas id="overlay"></canvas>
+      <!-- Escenario: cámara y televisión a todo el ancho -->
+      <div class="views">
+        <!-- El vídeo y el canvas se superponen; el canvas dibuja los puntos de las manos.
+             playsinline es necesario en iOS Safari. -->
+        <div class="camView" aria-label="Cámara">
+          <p class="placeholder">Activa la cámara para empezar</p>
+          <video id="webcam" autoplay muted playsinline></video>
+          <canvas id="overlay"></canvas>
+        </div>
+
+        <!-- La televisión: el vídeo que controlan los gestos -->
+        <div class="tvView" aria-label="Televisión">
+          <p class="placeholder">Vídeo cerrado</p>
+          <video id="player" src="video.mp4" controls playsinline loop></video>
+        </div>
+      </div>
+
+      <!-- aria-live: los lectores de pantalla anuncian si el mando está activado -->
+      <p id="mode" class="mode" aria-live="polite">Mando en reposo</p>
+
+      <div class="stats">
+        <div class="card stat">
+          <span class="statLabel">Manos</span>
+          <span class="statValue" id="numHands">-</span>
+        </div>
+        <div class="card stat">
+          <span class="statLabel">Mano derecha</span>
+          <span class="statValue small" id="rightHand">-</span>
+        </div>
+        <div class="card stat">
+          <span class="statLabel">Mano izquierda</span>
+          <span class="statValue small" id="leftHand">-</span>
+        </div>
+        <div class="card stat">
+          <span class="statLabel">FPS</span>
+          <span class="statValue" id="fps">-</span>
+        </div>
+      </div>
+
+      <!-- Debajo del escenario: medidas y registro, uno al lado del otro -->
+      <div class="bottom">
+        <section class="card">
+          <h2>Medidas para calibrar</h2>
+          <div class="measures">
+            <div>
+              <h3>Mano derecha</h3>
+              <pre id="measureRight">-</pre>
+            </div>
+            <div>
+              <h3>Mano izquierda</h3>
+              <pre id="measureLeft">-</pre>
+            </div>
           </div>
+          <p class="legend">
+            <b>dedos</b>: pulgar, índice, corazón, anular y meñique (▲ extendido, · doblado) ·
+            <b>ratios</b>: punta–muñeca / PIP–muñeca ·
+            <b>puntas</b>: punta–nudillo / mano (índice a meñique) ·
+            <b>puño</b>: el valor máximo de ratios y de puntas (los que se comparan con los umbrales) ·
+            <b>palma</b>: +1 hacia la cámara · <b>arriba</b>: +1 dedos hacia arriba ·
+            <b>mov.</b>: tamaños de mano en 0,5 s, derecha y arriba positivos.
+            Umbrales en <code>gestures.js</code> e <code>index.js</code>.
+          </p>
         </section>
 
-        <section aria-label="Televisión">
-          <!-- Pon tu vídeo en la carpeta con el nombre video.mp4 (o cambia el src) -->
-          <video id="player" src="video.mp4" controls playsinline loop></video>
-          <!-- aria-live: los lectores de pantalla anuncian si el mando está activado -->
-          <p id="mode" class="mode" aria-live="polite">Mando en reposo</p>
-          <!-- Interruptores para medir la misma versión con y sin cada parte; cada cambio queda en el registro -->
-          <div class="toggles" role="group" aria-label="Configuración del mando">
-            <button id="btnActivation" type="button" aria-pressed="true">Gesto de activación: sí</button>
-            <button id="btnDefenses" type="button" aria-pressed="false">Defensas: no</button>
-            <!-- Para repetir los intentos del gesto de cerrar durante la evaluación -->
-            <button id="btnReopen" type="button">Reabrir el vídeo</button>
+        <section class="card log">
+          <h2>Registro de acciones</h2>
+          <p class="hint">Cada acción queda registrada para contar aciertos y activaciones involuntarias.</p>
+          <div class="logButtons">
+            <button id="btnDownload" type="button">Descargar CSV</button>
+            <button id="btnClear" class="secondary" type="button">Borrar registro</button>
+          </div>
+          <div class="tableWrap">
+            <table id="log">
+              <thead>
+                <tr><th>Tiempo (s)</th><th>Acción</th><th>Detalle</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
           </div>
         </section>
       </div>
-
-      <h2>Resultados</h2>
-      <dl id="results">
-        <dt>Manos detectadas</dt><dd id="numHands">–</dd>
-        <dt>Mano izquierda</dt><dd id="leftHand">–</dd>
-        <dt>Mano derecha</dt><dd id="rightHand">–</dd>
-        <dt>Fotogramas por segundo</dt><dd id="fps">–</dd>
-      </dl>
-
-      <h2>Medidas para calibrar</h2>
-      <p>Valores de cada mano en cada fotograma. Usadlos para elegir los umbrales de <code>gestures.js</code>.</p>
-      <dl id="measures">
-        <dt>Mano derecha</dt><dd id="measureRight">–</dd>
-        <dt>Mano izquierda</dt><dd id="measureLeft">–</dd>
-      </dl>
-
-      <h2>Registro de acciones</h2>
-      <p>Cada acción sobre el reproductor queda registrada. Úsalo en la evaluación para contar aciertos y activaciones involuntarias.</p>
-      <button id="btnDownload" type="button">Descargar CSV</button>
-      <button id="btnClear" type="button">Borrar registro</button>
-      <table id="log">
-        <thead>
-          <tr><th>Tiempo (s)</th><th>Acción</th><th>Detalle</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
     </main>
 
     <script type="module" src="index.js"></script>

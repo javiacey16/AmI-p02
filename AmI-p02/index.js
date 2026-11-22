@@ -64,15 +64,16 @@ function setText(id, text) {
 
 /**
  * Summarises the environment: MediaPipe version, delegate, secure context and WebGPU.
- * @returns {string} One line per item, ready for show().
+ * @returns {string} A single line, ready for show() (it fits the status pill of the header).
  */
 function environmentReport() {
   const yesNo = (value) => (value ? "sí" : "no");
   return [
-    `MediaPipe Tasks Vision ${MEDIAPIPE_VERSION} · delegado: ${delegate}`,
-    `Contexto seguro (necesario para la cámara): ${yesNo(window.isSecureContext)}`,
+    `MediaPipe ${MEDIAPIPE_VERSION}`,
+    delegate,
+    `contexto seguro: ${yesNo(window.isSecureContext)}`,
     `WebGPU: ${yesNo("gpu" in navigator)}`,
-  ].join("\n");
+  ].join(" · ");
 }
 
 // 2. Create the task
@@ -542,16 +543,17 @@ function showMeasures(measures) {
       continue;
     }
     const { dx, dy } = trackers[name].displacement();
+    const fixed = (value) => value.toFixed(2).padStart(5); // aligned columns
+    // Short lines: the legend under the panel explains each one
     setText(
       id,
       [
-        `dedos      ${FINGER_NAMES.map((f) => mark(m.fingers[f])).join(" ")}   (pulgar índice corazón anular meñique)`,
-        `ratios     ${FINGER_NAMES.map((f) => m.ratios[f].toFixed(2)).join("  ")}`,
-        `puntas     ${["index", "middle", "ring", "pinky"].map((f) => m.tips[f].toFixed(2)).join("  ")}   (punta–nudillo / mano: índice corazón anular meñique)`,
-        `puño       ratio máx ${maxLongFinger(m.ratios).toFixed(2)}  punta máx ${maxLongFinger(m.tips).toFixed(2)}`,
-        `palma      ${m.palm.toFixed(2)}   (+1 hacia la cámara, −1 de espaldas)`,
-        `arriba     ${m.up.toFixed(2)}   (+1 dedos hacia arriba)`,
-        `movimiento dx ${dx.toFixed(2)}  dy ${dy.toFixed(2)}   (manos/0,5 s, derecha y arriba en pantalla)`,
+        `dedos   ${FINGER_NAMES.map((f) => mark(m.fingers[f]).padStart(5)).join(" ")}`,
+        `ratios  ${FINGER_NAMES.map((f) => fixed(m.ratios[f])).join(" ")}`,
+        `puntas        ${["index", "middle", "ring", "pinky"].map((f) => fixed(m.tips[f])).join(" ")}`,
+        `puño    ratio ${fixed(maxLongFinger(m.ratios))} · punta ${fixed(maxLongFinger(m.tips))}`,
+        `palma   ${fixed(m.palm)} · arriba ${fixed(m.up)}`,
+        `mov.    dx ${fixed(dx)} · dy ${fixed(dy)}`,
       ].join("\n"),
     );
   }
@@ -753,7 +755,7 @@ async function app() {
     btnCamera.disabled = true;
     try {
       await startCamera();
-      btnCamera.hidden = true;
+      btnCamera.textContent = "Cámara activa"; // stays disabled, as in P1
       requestAnimationFrame(predictWebcam);
     } catch (error) {
       console.error(error);

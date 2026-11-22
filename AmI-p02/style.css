@@ -1,147 +1,404 @@
+/* Mismo estilo que la práctica 1 (asistente del salón) */
 :root {
-  color-scheme: light dark;
+  --bg: #12161f;
+  --card: #1c2230;
+  --border: #2b3345;
+  --text: #e8ebf2;
+  --muted: #8d97ab;
+  --accent: #ff8a1f;
+  --accent-soft: rgba(255, 138, 31, 0.14);
+  --ok: #3ecf8e;
+  --ok-soft: rgba(62, 207, 142, 0.14);
+  --radius: 14px;
+  color-scheme: dark; /* controles nativos (vídeo, barras de desplazamiento) en oscuro */
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
-  font-family: system-ui, helvetica, arial, sans-serif;
   margin: 0;
-  padding: 1rem;
+  padding: 24px;
+  font-family: "Segoe UI", system-ui, helvetica, arial, sans-serif;
+  color: var(--text);
+  background: var(--bg);
 }
 
-main {
-  max-width: 1300px;
-  margin: 0 auto;
-}
-
-h1 {
-  font-style: italic;
-  color: #c43e00; /* naranja más oscuro: #ff6f00 no tiene contraste suficiente sobre blanco */
-}
-
-@media (prefers-color-scheme: dark) {
-  h1 {
-    color: #ff8f3a;
+@media (max-width: 600px) {
+  body {
+    padding: 16px;
   }
 }
 
+/* ---------- Cabecera ---------- */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1440px;
+  margin: 0 auto 20px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.7rem;
+  color: var(--accent);
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
 #status {
-  white-space: pre-line;
-  font-family: ui-monospace, monospace;
+  margin: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 0.9rem;
 }
 
-button {
-  font: inherit;
-  padding: 0.5rem 1rem;
-  cursor: pointer;
+#status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
-/* Cámara y reproductor, uno al lado del otro en pantallas anchas */
+/* ---------- Estructura ---------- */
+/* Una sola columna a todo el ancho: el escenario (cámara y vídeo) es lo más grande */
 .layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+/* Medidas y registro, uno al lado del otro debajo del escenario */
+.bottom {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 1rem;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
+  gap: 16px;
   align-items: start;
 }
 
-#player {
-  width: 100%;
-  background: #000;
+@media (max-width: 900px) {
+  .bottom {
+    grid-template-columns: 1fr;
+  }
 }
 
-/* Estado del mando: cambia de aspecto cuando está activado */
-.mode {
-  padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
-  background: #444;
-  color: #eee;
-  font-weight: bold;
+.card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
 }
 
-.mode.active {
-  background: #2e7d32;
-  color: #fff;
+h2 {
+  margin: 0 0 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
-/* A punto de activarse (retroalimentación, solo con las defensas) */
-.mode.pending {
-  background: #f9a825;
-  color: #000;
+h3 {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
 }
 
-/* Interruptores de configuración: resaltados cuando están en «sí» */
-.toggles {
+/* ---------- Controles ---------- */
+.controls {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 10px;
+  align-items: center;
 }
 
-.toggles button[aria-pressed="true"] {
-  background: #2e7d32;
-  border-color: #2e7d32;
-  color: #fff;
+button {
+  padding: 10px 18px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 600;
+  color: #1a1206;
+  background: var(--accent);
+  cursor: pointer;
 }
 
-#log {
-  border-collapse: collapse;
-  font-family: ui-monospace, monospace;
+button:hover:not(:disabled) {
+  filter: brightness(1.1);
 }
 
-#log th,
-#log td {
-  border: 1px solid #888;
-  padding: 0.25rem 0.5rem;
-  text-align: left;
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-/* Vídeo y canvas superpuestos: nunca más anchos que la pantalla ni que 640 px */
-.camView {
+button:disabled {
+  color: var(--muted);
+  background: var(--border);
+  cursor: default;
+}
+
+/* Botones secundarios e interruptores apagados: solo el borde */
+button.secondary,
+button.toggle[aria-pressed="false"] {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* Interruptor encendido: verde, para distinguirlo de las acciones */
+button.toggle[aria-pressed="true"] {
+  color: #06140d;
+  background: var(--ok);
+}
+
+/* ---------- Cámara y televisión ---------- */
+/* Dos columnas iguales a todo el ancho; una debajo de otra en pantallas estrechas */
+.views {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 400px) {
+  .views {
+    grid-template-columns: 1fr;
+  }
+}
+
+.camView,
+.tvView {
   position: relative;
   width: 100%;
-  max-width: 640px;
-  margin: 1rem 0;
-  /* Efecto espejo, más natural con la cámara frontal.
-     No afecta a los datos: izquierda/derecha siguen siendo las de la persona. */
-  transform: scaleX(-1);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #0b0e14;
 }
 
-/* height: auto mantiene la proporción real de la cámara (también en vertical en el móvil) */
-.camView video {
-  display: block;
-  width: 100%;
-  height: auto;
+.camView {
+  aspect-ratio: 4 / 3;
 }
 
-.camView canvas {
+.tvView {
+  aspect-ratio: 4 / 3; /* misma altura que la cámara; el vídeo se ajusta dentro */
+}
+
+.placeholder {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--muted);
+}
+
+.camView video,
+.camView canvas,
+#player {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
 }
 
-#results {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
+/* Efecto espejo, más natural con la cámara frontal. Se voltean a la vez el vídeo y el canvas,
+   así los puntos siguen encima de la mano. No afecta a los datos: izquierda/derecha siguen
+   siendo las de la persona. */
+.camView video,
+.camView canvas {
+  transform: scaleX(-1);
 }
 
-#results dt {
-  font-weight: bold;
+.camView canvas {
+  pointer-events: none;
 }
 
-#results dd {
+#player {
+  object-fit: contain;
+  background: #000;
+}
+
+/* ---------- Estado del mando ---------- */
+.mode {
   margin: 0;
-  font-family: ui-monospace, monospace;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  font-weight: 600;
+  color: var(--muted);
 }
 
-/* Panel de calibración: varias líneas por mano, columnas alineadas */
-#measures dt {
-  font-weight: bold;
+.mode::before {
+  content: "● ";
 }
 
-#measures dd {
-  margin: 0 0 0.75rem;
-  font-family: ui-monospace, monospace;
-  white-space: pre;
+.mode.active {
+  border-left-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--text);
+}
+
+.mode.active::before {
+  color: var(--ok);
+}
+
+/* A punto de actuar (retroalimentación, solo con las defensas) */
+.mode.pending {
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.mode.pending::before {
+  color: var(--accent);
+}
+
+/* ---------- Estadísticas ---------- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+}
+
+.statLabel {
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.statValue {
+  font-size: 1.3rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.statValue.small {
+  font-size: 0.9rem;
+}
+
+/* ---------- Medidas para calibrar ---------- */
+.measures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.measures pre {
+  margin: 0;
+  padding: 10px 12px;
   overflow-x: auto;
+  border-radius: 8px;
+  background: var(--bg);
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.legend,
+.hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.legend b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color: var(--text);
+}
+
+/* ---------- Registro de acciones ---------- */
+.log .hint {
+  margin: 0 0 12px;
+}
+
+.logButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.logButtons button {
+  padding: 8px 14px;
+  font-size: 0.9rem;
+}
+
+/* Altura fija con barra de desplazamiento: el registro no crece aunque tenga cientos de filas */
+.tableWrap {
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--muted) transparent; /* barra visible sobre el fondo oscuro */
+}
+
+#log {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 6px;
+  font-size: 0.88rem;
+}
+
+#log th {
+  position: sticky;
+  top: 0;
+  padding: 0 10px 4px;
+  background: var(--card);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+#log td {
+  padding: 8px 10px;
+  background: var(--bg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Cada fila como los elementos de la lista de avisos de la P1 */
+#log td:first-child {
+  border-left: 4px solid var(--accent);
+  border-radius: 8px 0 0 8px;
+  color: var(--muted);
+}
+
+#log td:last-child {
+  border-radius: 0 8px 8px 0;
+  color: var(--muted);
 }
