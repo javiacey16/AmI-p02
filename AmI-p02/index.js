@@ -242,13 +242,16 @@ const SWIPE = {
   dominance: 2, // the horizontal movement must be this many times the vertical one
   upMin: 0.5, // fingers roughly up (looser than activation: the hand tilts while moving)
   // Defences (only when settings.defenses is on):
-  cooldownMs: 1000, // after a jump, ignore swipes for a while (e.g. the hand coming back)
+  sameDirMs: 400, // after a jump, wait this long before another jump in the SAME direction
+  reverseMs: 1200, // …and this long before a jump in the OPPOSITE direction, so the hand
+  // coming back to swipe again does not jump the other way
   poseMs: 300, // the open hand must be held for the whole swipe, not only in the last frame
 };
 
 /** State of the swipe gesture. */
 const swipe = {
   lastFired: -Infinity, // time of the last jump
+  lastDir: 0, // direction of the last jump: +1 forward, −1 backward
   poseSince: null, // since when the open hand has been seen without interruption
 };
 
@@ -304,9 +307,10 @@ function recognizeGestures(result) {
 /**
  * Forward / backward gesture: a sideways swipe of the open right hand jumps SWIPE.seekSeconds
  * forward (to the right on screen) or backward (to the left). Without defences, any frame with
- * the open hand and enough sideways movement fires. With defences: a cooldown after each jump,
- * so the hand coming back does not jump the other way, and the open hand must have been held
- * for the whole swipe (SWIPE.poseMs).
+ * the open hand and enough sideways movement fires, so the hand coming back after a swipe jumps
+ * the other way. With defences: a short wait before another jump in the same direction, a longer
+ * one before the opposite direction (the return stroke is ignored), and the open hand must have
+ * been held for the whole swipe (SWIPE.poseMs).
  * @param {number} now Current time in milliseconds (performance.now()).
  * @param {object | null} m Output of measureHand() for the right hand, or null if missing.
  * @returns {void}
@@ -320,18 +324,26 @@ function updateSwipe(now, m) {
   }
   swipe.poseSince ??= now;
   if (player.hidden) return; // the video is closed: nothing to move
-
-  if (defended) {
-    if (now - swipe.lastFired < SWIPE.cooldownMs) return; // cooldown
-    if (now - swipe.poseSince < SWIPE.poseMs) return; // hand not open long enough
-  }
+  if (defended && now - swipe.poseSince < SWIPE.poseMs) return; // hand not open long enough
 
   const { dx, dy } = trackers.Right.displacement();
   const sideways = Math.abs(dx) >= SWIPE.minDx && Math.abs(dx) >= SWIPE.dominance * Math.abs(dy);
   if (!sideways) return;
 
-  seek(Math.sign(dx) * SWIPE.seekSeconds); // dx > 0: to the right on screen → forward
+  const dir = Math.sign(dx); // +1: to the right on screen → forward; −1: backward
+  if (defended) {
+    const wait = dir === swipe.lastDir ? SWIPE.sameDirMs : SWIPE.reverseMs;
+    if (now - swipe.lastFired < wait) {
+      // Too soon (e.g. the return stroke): discard this movement so it does not add up
+      // with the next swipe
+      trackers.Right.clear();
+      return;
+    }
+  }
+
+  seek(dir * SWIPE.seekSeconds);
   swipe.lastFired = now;
+  swipe.lastDir = dir;
   trackers.Right.clear(); // the same movement must not fire again on the next frame
   keepActive(now);
 }
@@ -443,6 +455,7 @@ function resetRemote() {
   remote.activeUntil = 0;
   for (const hold of Object.values(holds)) hold.reset();
   swipe.lastFired = -Infinity;
+  swipe.lastDir = 0;
   swipe.poseSince = null;
 }
 
