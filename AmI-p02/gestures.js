@@ -386,6 +386,54 @@ export class HoldGesture {
   }
 }
 
+// ---------- Dynamic gestures: direction-aware waiting ----------
+
+/**
+ * Decides whether a stroke (a movement in one direction, e.g. a swipe or a volume step) may fire,
+ * given the previous one. Another stroke in the SAME direction only has to wait `sameDirMs`, so
+ * strokes can be chained; one in the OPPOSITE direction has to wait `reverseMs`, so the hand
+ * coming back to repeat the gesture does not fire the opposite action.
+ */
+export class StrokeGate {
+  constructor() {
+    this.reset();
+  }
+
+  /**
+   * Forgets the previous stroke.
+   * @returns {void}
+   */
+  reset() {
+    this.lastTime = -Infinity; // when the last stroke fired
+    this.lastDir = 0; // its direction: +1 or −1
+  }
+
+  /**
+   * Whether a stroke in `dir` may fire now.
+   * @param {number} now Current time in milliseconds (performance.now()).
+   * @param {number} dir Direction of the new stroke: +1 or −1.
+   * @param {object} [options]
+   * @param {number} [options.sameDirMs=0] Wait after a stroke in the same direction.
+   * @param {number} [options.reverseMs=0] Wait after a stroke in the opposite direction.
+   * @returns {boolean} true if enough time has passed since the last stroke.
+   */
+  allows(now, dir, { sameDirMs = 0, reverseMs = 0 } = {}) {
+    const wait = dir === this.lastDir ? sameDirMs : reverseMs;
+    return now - this.lastTime >= wait;
+  }
+
+  /**
+   * Remembers a stroke that has just fired.
+   * @param {number} now Current time in milliseconds (performance.now()).
+   * @param {number} dir Its direction: +1 or −1.
+   * @returns {void}
+   */
+  record(now, dir) {
+    this.lastTime = now;
+    this.lastDir = dir;
+  }
+}
+
 // ---------- All together ----------
 
 /**

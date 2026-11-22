@@ -10,7 +10,15 @@ import {
   DrawingUtils,
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.2/vision_bundle.mjs";
 // Reusable gesture helpers (finger, palm and motion measures)
-import { FINGER_NAMES, HoldGesture, MotionTracker, maxLongFinger, measureHand } from "./gestures.js";
+import {
+  FINGER_NAMES,
+  HoldGesture,
+  MotionTracker,
+  StrokeGate,
+  matchesPattern,
+  maxLongFinger,
+  measureHand,
+} from "./gestures.js";
 
 const MEDIAPIPE_VERSION = "1.2.2"; // same as in the import above
 const WASM_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`;
@@ -250,9 +258,30 @@ const SWIPE = {
 
 /** State of the swipe gesture. */
 const swipe = {
-  lastFired: -Infinity, // time of the last jump
-  lastDir: 0, // direction of the last jump: +1 forward, −1 backward
+  gate: new StrokeGate(), // direction-aware waiting between jumps (defence)
   poseSince: null, // since when the open hand has been seen without interruption
+};
+
+/**
+ * Volume: right hand pointing (index extended, the other long fingers bent) and left hand open
+ * with the palm towards the camera. Moving the right hand up raises the volume; down lowers it.
+ * One movement = one step. CALIBRATE these values with the measures panel ("movimiento" line).
+ */
+const VOLUME = {
+  step: 0.1, // volume change per movement (the volume goes from 0 to 1: 10 steps)
+  minDy: 0.8, // vertical wrist displacement within 0.5 s, in hand sizes
+  dominance: 2, // the vertical movement must be this many times the horizontal one
+  palmMin: 0.5, // left palm towards the camera (palm measure, −1…+1)
+  // Defences (only when settings.defenses is on):
+  sameDirMs: 300, // after a step, wait this long before another step in the SAME direction
+  reverseMs: 1200, // …and this long before the OPPOSITE direction (the hand coming back)
+  poseMs: 300, // both hands must be in the pose for the whole movement
+};
+
+/** State of the volume gesture. */
+const volume = {
+  gate: new StrokeGate(), // direction-aware waiting between steps (defence)
+  poseSince: null, // since when both hands have been in the pose without interruption
 };
 
 /** Hold-to-trigger state of each static gesture. */
@@ -295,13 +324,15 @@ function recognizeGestures(result) {
     // The remote is idle: ignore every command and forget any hold in progress
     holds.fist.reset();
     swipe.poseSince = null;
+    volume.poseSince = null;
     return;
   }
 
   updateFist(now, measures.Right);
   updateSwipe(now, measures.Right);
+  updateVolume(now, measures.Right, measures.Left);
 
-  // TODO: volume and our two own gestures. Call keepActive() after each accepted command.
+  // TODO: our two own gestures. Call keepActive() after each accepted command.
 }
 
 /**
@@ -331,19 +362,55 @@ function updateSwipe(now, m) {
   if (!sideways) return;
 
   const dir = Math.sign(dx); // +1: to the right on screen → forward; −1: backward
-  if (defended) {
-    const wait = dir === swipe.lastDir ? SWIPE.sameDirMs : SWIPE.reverseMs;
-    if (now - swipe.lastFired < wait) {
-      // Too soon (e.g. the return stroke): discard this movement so it does not add up
-      // with the next swipe
-      trackers.Right.clear();
-      return;
-    }
+  if (defended && !swipe.gate.allows(now, dir, SWIPE)) {
+    // Too soon (e.g. the return stroke): discard this movement so it does not add up
+    // with the next swipe
+    trackers.Right.clear();
+    return;
   }
 
   seek(dir * SWIPE.seekSeconds);
-  swipe.lastFired = now;
-  swipe.lastDir = dir;
+  swipe.gate.record(now, dir);
+  trackers.Right.clear(); // the same movement must not fire again on the next frame
+  keepActive(now);
+}
+
+/**
+ * Volume gesture: with the right hand pointing and the left palm towards the camera, moving the
+ * right hand up raises the volume by VOLUME.step and moving it down lowers it. Without defences,
+ * any frame with both poses and enough vertical movement fires. With defences: both hands must
+ * be in the pose for the whole movement (VOLUME.poseMs), and the direction-aware wait ignores
+ * the hand coming back to repeat the gesture.
+ * @param {number} now Current time in milliseconds (performance.now()).
+ * @param {object | null} right Output of measureHand() for the right hand, or null if missing.
+ * @param {object | null} left Output of measureHand() for the left hand, or null if missing.
+ * @returns {void}
+ */
+function updateVolume(now, right, left) {
+  const defended = settings.defenses;
+  const pointing =
+    right !== null && matchesPattern(right.fingers, { index: true, middle: false, ring: false, pinky: false });
+  const leftPalm = left !== null && left.longFingers === 4 && left.palm > VOLUME.palmMin;
+  if (!pointing || !leftPalm) {
+    volume.poseSince = null;
+    return;
+  }
+  volume.poseSince ??= now;
+  if (player.hidden) return; // the video is closed: nothing to change
+  if (defended && now - volume.poseSince < VOLUME.poseMs) return; // pose not held long enough
+
+  const { dx, dy } = trackers.Right.displacement();
+  const vertical = Math.abs(dy) >= VOLUME.minDy && Math.abs(dy) >= VOLUME.dominance * Math.abs(dx);
+  if (!vertical) return;
+
+  const dir = Math.sign(dy); // +1: up → louder; −1: down → quieter
+  if (defended && !volume.gate.allows(now, dir, VOLUME)) {
+    trackers.Right.clear(); // too soon (e.g. the hand coming back): discard this movement
+    return;
+  }
+
+  changeVolume(dir * VOLUME.step);
+  volume.gate.record(now, dir);
   trackers.Right.clear(); // the same movement must not fire again on the next frame
   keepActive(now);
 }
@@ -454,9 +521,10 @@ function keepActive(now = performance.now()) {
 function resetRemote() {
   remote.activeUntil = 0;
   for (const hold of Object.values(holds)) hold.reset();
-  swipe.lastFired = -Infinity;
-  swipe.lastDir = 0;
+  swipe.gate.reset();
   swipe.poseSince = null;
+  volume.gate.reset();
+  volume.poseSince = null;
 }
 
 /**
