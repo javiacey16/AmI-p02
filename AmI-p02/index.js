@@ -313,10 +313,27 @@ const circle = {
   lastFired: -Infinity, // time of the last toggle
 };
 
+/**
+ * Mute / unmute (from our mini elicitation): right index finger up, the other fingers closed,
+ * palm towards the person (the back of the hand faces the camera), and the hand still.
+ * Being still separates it from the circle; the left palm must NOT face the camera, which
+ * separates it from the volume gesture. CALIBRATE these values with the measures panel.
+ */
+const MUTE = {
+  palmMax: -0.4, // palm measure below this: back of the hand towards the camera (−1 = fully)
+  upMin: 0.5, // fingers pointing up (up measure, −1…+1)
+  maxMotion: 0.3, // max wrist displacement, in hand sizes per 0.5 s, to count as still
+  // Defences (only when settings.defenses is on):
+  keepPalm: -0.2, // hysteresis: once holding, a looser palm threshold keeps the pose
+  holdMs: 500, // the pose must be held this long (otherwise it fires on the first frame)
+  graceMs: 150, // tolerance: short detection drops do not restart the hold
+};
+
 /** Hold-to-trigger state of each static gesture. */
 const holds = {
   activation: new HoldGesture(),
   fist: new HoldGesture(),
+  mute: new HoldGesture(),
 };
 
 /**
@@ -352,6 +369,7 @@ function recognizeGestures(result) {
   if (!active) {
     // The remote is idle: ignore every command and forget any hold in progress
     holds.fist.reset();
+    holds.mute.reset();
     swipe.poseSince = null;
     volume.poseSince = null;
     trackers.circle.clear();
@@ -362,8 +380,7 @@ function recognizeGestures(result) {
   updateSwipe(now, measures.Right);
   updateVolume(now, measures.Right, measures.Left);
   updateCircle(now, right, measures.Right, measures.Left);
-
-  // TODO: mute (pending from the mini elicitation). Call keepActive() after each accepted command.
+  updateMute(now, measures.Right, measures.Left);
 }
 
 /**
@@ -419,9 +436,7 @@ function updateSwipe(now, m) {
  */
 function updateVolume(now, right, left) {
   const defended = settings.defenses;
-  const pointing = isPointing(right);
-  const leftPalm = left !== null && left.longFingers === 4 && left.palm > VOLUME.palmMin;
-  if (!pointing || !leftPalm) {
+  if (!isPointing(right) || !isLeftPalm(left)) {
     volume.poseSince = null;
     return;
   }
@@ -456,6 +471,55 @@ function isPointing(m) {
 }
 
 /**
+ * Whether the left hand is open with the palm towards the camera (the left half of the volume
+ * gesture). The circle and mute gestures require it NOT to be, so they never overlap with volume.
+ * @param {object | null} left Output of measureHand() for the left hand, or null if missing.
+ * @returns {boolean} true if the left palm faces the camera.
+ */
+function isLeftPalm(left) {
+  return left !== null && left.longFingers === 4 && left.palm > VOLUME.palmMin;
+}
+
+/**
+ * Mute gesture: the right index finger up with the palm towards the person (back of the hand to
+ * the camera), still, toggles the sound. Without defences it fires on the first frame of the
+ * pose; with defences it must be held MUTE.holdMs (with hysteresis on the palm and a grace
+ * period), and the remote shows the progress so the person can abort.
+ * @param {number} now Current time in milliseconds (performance.now()).
+ * @param {object | null} right Output of measureHand() for the right hand, or null if missing.
+ * @param {object | null} left Output of measureHand() for the left hand, or null if missing.
+ * @returns {void}
+ */
+function updateMute(now, right, left) {
+  const defended = settings.defenses;
+  const hold = holds.mute;
+  const loose = defended && hold.holding; // hysteresis while holding
+  const { dx, dy } = trackers.Right.displacement();
+  const pose =
+    isPointing(right) &&
+    !isLeftPalm(left) &&
+    right.palm < (loose ? MUTE.keepPalm : MUTE.palmMax) &&
+    right.up > MUTE.upMin &&
+    Math.abs(dx) < MUTE.maxMotion &&
+    Math.abs(dy) < MUTE.maxMotion;
+
+  const { fired, progress } = hold.update(now, pose, {
+    holdMs: defended ? MUTE.holdMs : 0,
+    graceMs: defended ? MUTE.graceMs : 0,
+  });
+  if (player.hidden) return; // the video is closed: nothing to mute
+
+  if (fired) {
+    toggleMute();
+    keepActive(now);
+  } else if (defended && hold.holding) {
+    // Feedback (defence): the person sees it is about to toggle the sound and can abort
+    const what = player.muted ? "Quitando el silencio" : "Silenciando";
+    setMode(`${what}… ${Math.round(progress * 100)} %`, true, true);
+  }
+}
+
+/**
  * Pause / resume gesture: drawing a circle with the right index finger toggles the video.
  * The fingertip path is only recorded while the pointing pose holds and the left palm is not
  * facing the camera (that would be the volume gesture). Without defences, a single frame without
@@ -469,10 +533,9 @@ function isPointing(m) {
  */
 function updateCircle(now, hand, right, left) {
   const defended = settings.defenses;
-  const leftPalm = left !== null && left.longFingers === 4 && left.palm > VOLUME.palmMin;
   const tracker = trackers.circle;
 
-  if (isPointing(right) && !leftPalm) {
+  if (isPointing(right) && !isLeftPalm(left)) {
     circle.lastPoseAt = now;
     tracker.push(now, hand.landmarks);
   } else if (now - circle.lastPoseAt > (defended ? CIRCLE.graceMs : 0)) {
