@@ -12,7 +12,9 @@ import {
 // Reusable gesture helpers (finger, palm and motion measures)
 import {
   FINGER_NAMES,
+  LM,
   HoldGesture,
+  circleMeasure,
   MotionTracker,
   StrokeGate,
   matchesPattern,
@@ -186,10 +188,14 @@ function drawResults(result) {
 
 // 6. OUR WORK: from landmarks to gestures
 
-/** Wrist motion of each hand over the last half second (dynamic gestures). */
+/**
+ * Motion trackers: the wrist of each hand over the last half second (swipes, volume, stillness)
+ * and the right index fingertip over the last two seconds (circle).
+ */
 const trackers = {
   Right: new MotionTracker({ windowMs: 500 }),
   Left: new MotionTracker({ windowMs: 500 }),
+  circle: new MotionTracker({ windowMs: 2000, point: LM.INDEX_TIP }),
 };
 
 /**
@@ -285,6 +291,28 @@ const volume = {
   poseSince: null, // since when both hands have been in the pose without interruption
 };
 
+/**
+ * Pause / resume (from our mini elicitation): draw a circle with the right index finger, the
+ * other fingers closed. Either direction counts. The left palm must NOT be facing the camera,
+ * so it is not confused with the volume gesture (same right-hand pose).
+ * CALIBRATE these values with the measures panel ("círculo" line).
+ */
+const CIRCLE = {
+  minTurn: 300, // total turning of the fingertip path, in degrees (a full circle is 360)
+  minSize: 0.6, // smaller side of the path, in hand sizes (rejects small jitter and lines)
+  minRoundness: 0.5, // smaller side / larger side of the path (rejects flat ellipses and lines)
+  // Defences (only when settings.defenses is on):
+  graceMs: 200, // tolerance: short pose drops do not erase the path drawn so far
+  cooldownMs: 1000, // after a toggle, ignore circles (a person who keeps circling toggles once)
+  feedbackTurn: 120, // from this turning on, show the progress so the person can stop
+};
+
+/** State of the circle gesture. */
+const circle = {
+  lastPoseAt: -Infinity, // last time the pointing pose was seen
+  lastFired: -Infinity, // time of the last toggle
+};
+
 /** Hold-to-trigger state of each static gesture. */
 const holds = {
   activation: new HoldGesture(),
@@ -326,14 +354,16 @@ function recognizeGestures(result) {
     holds.fist.reset();
     swipe.poseSince = null;
     volume.poseSince = null;
+    trackers.circle.clear();
     return;
   }
 
   updateFist(now, measures.Right);
   updateSwipe(now, measures.Right);
   updateVolume(now, measures.Right, measures.Left);
+  updateCircle(now, right, measures.Right, measures.Left);
 
-  // TODO: our two own gestures. Call keepActive() after each accepted command.
+  // TODO: mute (pending from the mini elicitation). Call keepActive() after each accepted command.
 }
 
 /**
@@ -389,8 +419,7 @@ function updateSwipe(now, m) {
  */
 function updateVolume(now, right, left) {
   const defended = settings.defenses;
-  const pointing =
-    right !== null && matchesPattern(right.fingers, { index: true, middle: false, ring: false, pinky: false });
+  const pointing = isPointing(right);
   const leftPalm = left !== null && left.longFingers === 4 && left.palm > VOLUME.palmMin;
   if (!pointing || !leftPalm) {
     volume.poseSince = null;
@@ -414,6 +443,60 @@ function updateVolume(now, right, left) {
   volume.gate.record(now, dir);
   trackers.Right.clear(); // the same movement must not fire again on the next frame
   keepActive(now);
+}
+
+/**
+ * Whether a hand points with the index finger only (index extended, the other long fingers
+ * bent; the thumb is ignored). Shared by the volume and circle gestures.
+ * @param {object | null} m Output of measureHand(), or null if the hand is missing.
+ * @returns {boolean} true if the hand is in the pointing pose.
+ */
+function isPointing(m) {
+  return m !== null && matchesPattern(m.fingers, { index: true, middle: false, ring: false, pinky: false });
+}
+
+/**
+ * Pause / resume gesture: drawing a circle with the right index finger toggles the video.
+ * The fingertip path is only recorded while the pointing pose holds and the left palm is not
+ * facing the camera (that would be the volume gesture). Without defences, a single frame without
+ * the pose erases the path. With defences: a short grace period keeps the path, a cooldown after
+ * each toggle, and progress feedback while the circle is being drawn.
+ * @param {number} now Current time in milliseconds (performance.now()).
+ * @param {{landmarks: object[], world: object[]} | null} hand The right hand from findHand().
+ * @param {object | null} right Output of measureHand() for the right hand, or null if missing.
+ * @param {object | null} left Output of measureHand() for the left hand, or null if missing.
+ * @returns {void}
+ */
+function updateCircle(now, hand, right, left) {
+  const defended = settings.defenses;
+  const leftPalm = left !== null && left.longFingers === 4 && left.palm > VOLUME.palmMin;
+  const tracker = trackers.circle;
+
+  if (isPointing(right) && !leftPalm) {
+    circle.lastPoseAt = now;
+    tracker.push(now, hand.landmarks);
+  } else if (now - circle.lastPoseAt > (defended ? CIRCLE.graceMs : 0)) {
+    tracker.clear(); // pose lost: the circle starts again
+    return;
+  }
+  if (player.hidden) return; // the video is closed: nothing to pause
+  if (defended && now - circle.lastFired < CIRCLE.cooldownMs) {
+    tracker.clear(); // cooldown: do not keep drawing towards a second toggle
+    return;
+  }
+
+  const { turn, size, roundness } = circleMeasure(tracker.samples);
+  const isCircle = turn >= CIRCLE.minTurn && size >= CIRCLE.minSize && roundness >= CIRCLE.minRoundness;
+  if (isCircle) {
+    togglePause();
+    circle.lastFired = now;
+    tracker.clear(); // the same circle must not fire again on the next frame
+    keepActive(now);
+  } else if (defended && turn >= CIRCLE.feedbackTurn) {
+    // Feedback (defence): the person sees the circle is about to toggle the video
+    const progress = Math.min(99, Math.round((turn / CIRCLE.minTurn) * 100));
+    setMode(`${player.paused ? "Reanudando" : "Pausando"}… ${progress} %`, true, true);
+  }
 }
 
 /**
@@ -526,6 +609,9 @@ function resetRemote() {
   swipe.poseSince = null;
   volume.gate.reset();
   volume.poseSince = null;
+  circle.lastPoseAt = -Infinity;
+  circle.lastFired = -Infinity;
+  trackers.circle.clear();
 }
 
 /**
@@ -545,17 +631,19 @@ function showMeasures(measures) {
     const { dx, dy } = trackers[name].displacement();
     const fixed = (value) => value.toFixed(2).padStart(5); // aligned columns
     // Short lines: the legend under the panel explains each one
-    setText(
-      id,
-      [
-        `dedos   ${FINGER_NAMES.map((f) => mark(m.fingers[f]).padStart(5)).join(" ")}`,
-        `ratios  ${FINGER_NAMES.map((f) => fixed(m.ratios[f])).join(" ")}`,
-        `puntas        ${["index", "middle", "ring", "pinky"].map((f) => fixed(m.tips[f])).join(" ")}`,
-        `puño    ratio ${fixed(maxLongFinger(m.ratios))} · punta ${fixed(maxLongFinger(m.tips))}`,
-        `palma   ${fixed(m.palm)} · arriba ${fixed(m.up)}`,
-        `mov.    dx ${fixed(dx)} · dy ${fixed(dy)}`,
-      ].join("\n"),
-    );
+    const lines = [
+      `dedos   ${FINGER_NAMES.map((f) => mark(m.fingers[f]).padStart(5)).join(" ")}`,
+      `ratios  ${FINGER_NAMES.map((f) => fixed(m.ratios[f])).join(" ")}`,
+      `puntas        ${["index", "middle", "ring", "pinky"].map((f) => fixed(m.tips[f])).join(" ")}`,
+      `puño    ratio ${fixed(maxLongFinger(m.ratios))} · punta ${fixed(maxLongFinger(m.tips))}`,
+      `palma   ${fixed(m.palm)} · arriba ${fixed(m.up)}`,
+      `mov.    dx ${fixed(dx)} · dy ${fixed(dy)}`,
+    ];
+    if (name === "Right") {
+      const c = circleMeasure(trackers.circle.samples);
+      lines.push(`círculo ${c.turn.toFixed(0).padStart(4)}° · tam. ${fixed(c.size)} · red. ${fixed(c.roundness)}`);
+    }
+    setText(id, lines.join("\n"));
   }
 }
 

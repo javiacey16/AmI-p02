@@ -322,6 +322,56 @@ export class MotionTracker {
   }
 }
 
+// ---------- Trajectories: circles ----------
+
+/**
+ * Describes how circular a trajectory is. Feed it the samples of a MotionTracker that follows
+ * the index fingertip. Points closer than `minStep` hand sizes to the previous kept point are
+ * skipped, so the jitter of a still finger does not add up as turning.
+ * @param {{x: number, y: number, size: number}[]} samples MotionTracker samples (x already
+ *   scaled by the aspect ratio, size = hand size in the image).
+ * @param {number} [minStep=0.1] Minimum distance between kept points, in hand sizes.
+ * @returns {{turn: number, size: number, roundness: number}} turn: total turning of the path in
+ *   degrees (absolute value, so both directions count; a full circle ≈ 360); size: the smaller
+ *   side of the path's bounding box, in hand sizes (a straight line has size ≈ 0); roundness:
+ *   smaller side / larger side of the bounding box (1 for a circle, close to 0 for a line).
+ */
+export function circleMeasure(samples, minStep = 0.1) {
+  const empty = { turn: 0, size: 0, roundness: 0 };
+  if (samples.length < 3) return empty;
+  const handSize = samples.reduce((sum, s) => sum + s.size, 0) / samples.length || 1;
+
+  // Keep only points that moved enough since the last kept one
+  const points = [samples[0]];
+  for (const s of samples) {
+    const last = points[points.length - 1];
+    if (Math.hypot(s.x - last.x, s.y - last.y) >= minStep * handSize) points.push(s);
+  }
+  if (points.length < 4) return empty;
+
+  // Sum of the signed angles between consecutive movement vectors
+  let turn = 0;
+  for (let i = 1; i < points.length - 1; i++) {
+    const ax = points[i].x - points[i - 1].x;
+    const ay = points[i].y - points[i - 1].y;
+    const bx = points[i + 1].x - points[i].x;
+    const by = points[i + 1].y - points[i].y;
+    turn += Math.atan2(ax * by - ay * bx, ax * bx + ay * by);
+  }
+
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const width = Math.max(...xs) - Math.min(...xs);
+  const height = Math.max(...ys) - Math.min(...ys);
+  const small = Math.min(width, height);
+  const large = Math.max(width, height);
+  return {
+    turn: Math.abs((turn * 180) / Math.PI),
+    size: small / handSize,
+    roundness: large === 0 ? 0 : small / large,
+  };
+}
+
 // ---------- Static gestures: hold to trigger ----------
 
 /**
