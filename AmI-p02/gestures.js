@@ -331,13 +331,15 @@ export class MotionTracker {
  * @param {{x: number, y: number, size: number}[]} samples MotionTracker samples (x already
  *   scaled by the aspect ratio, size = hand size in the image).
  * @param {number} [minStep=0.1] Minimum distance between kept points, in hand sizes.
- * @returns {{turn: number, size: number, roundness: number}} turn: total turning of the path in
- *   degrees (absolute value, so both directions count; a full circle ≈ 360); size: the smaller
- *   side of the path's bounding box, in hand sizes (a straight line has size ≈ 0); roundness:
- *   smaller side / larger side of the bounding box (1 for a circle, close to 0 for a line).
+ * @returns {{turn: number, size: number, roundness: number, sectors: number}} turn: total
+ *   turning of the path in degrees (absolute value, so both directions count; a full circle
+ *   ≈ 360); size: the smaller side of the path's bounding box, in hand sizes (a straight line
+ *   has size ≈ 0); roundness: smaller side / larger side of the bounding box (1 for a circle,
+ *   close to 0 for a line); sectors: how many of the 8 directions around the path's centre
+ *   (45° each) the path goes through (8 for a full circle; a wobble or an arc visits few).
  */
 export function circleMeasure(samples, minStep = 0.1) {
-  const empty = { turn: 0, size: 0, roundness: 0 };
+  const empty = { turn: 0, size: 0, roundness: 0, sectors: 0 };
   if (samples.length < 3) return empty;
   const handSize = samples.reduce((sum, s) => sum + s.size, 0) / samples.length || 1;
 
@@ -365,10 +367,21 @@ export function circleMeasure(samples, minStep = 0.1) {
   const height = Math.max(...ys) - Math.min(...ys);
   const small = Math.min(width, height);
   const large = Math.max(width, height);
+
+  // Directions around the centre of the bounding box that the path goes through
+  const cx = Math.min(...xs) + width / 2;
+  const cy = Math.min(...ys) + height / 2;
+  const visited = new Set();
+  for (const p of points) {
+    const angle = Math.atan2(p.y - cy, p.x - cx) + Math.PI; // 0 … 2π
+    visited.add(Math.floor(angle / (Math.PI / 4)) % 8);
+  }
+
   return {
     turn: Math.abs((turn * 180) / Math.PI),
     size: small / handSize,
     roundness: large === 0 ? 0 : small / large,
+    sectors: visited.size,
   };
 }
 

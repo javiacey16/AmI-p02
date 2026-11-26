@@ -253,7 +253,7 @@ const FIST = {
  */
 const SWIPE = {
   seekSeconds: 10, // size of each jump
-  minDx: 1.0, // horizontal wrist displacement within 0.5 s, in hand sizes
+  minDx: 1.5, // horizontal wrist displacement within 0.5 s, in hand sizes (1.0 was too short)
   dominance: 2, // the horizontal movement must be this many times the vertical one
   upMin: 0.5, // fingers roughly up (looser than activation: the hand tilts while moving)
   // Defences (only when settings.defenses is on):
@@ -299,8 +299,10 @@ const volume = {
  */
 const CIRCLE = {
   minTurn: 300, // total turning of the fingertip path, in degrees (a full circle is 360)
-  minSize: 0.6, // smaller side of the path, in hand sizes (rejects small jitter and lines)
-  minRoundness: 0.5, // smaller side / larger side of the path (rejects flat ellipses and lines)
+  minSize: 0.8, // smaller side of the path, in hand sizes (rejects small jitter and lines)
+  minRoundness: 0.6, // smaller side / larger side of the path (rejects flat ellipses and lines)
+  minSectors: 7, // the path must go around its centre: at least 7 of the 8 directions (45° each)
+  minStep: 0.2, // fingertip moves shorter than this (in hand sizes) are ignored: they are jitter
   // Defences (only when settings.defenses is on):
   graceMs: 200, // tolerance: short pose drops do not erase the path drawn so far
   cooldownMs: 1000, // after a toggle, ignore circles (a person who keeps circling toggles once)
@@ -548,8 +550,12 @@ function updateCircle(now, hand, right, left) {
     return;
   }
 
-  const { turn, size, roundness } = circleMeasure(tracker.samples);
-  const isCircle = turn >= CIRCLE.minTurn && size >= CIRCLE.minSize && roundness >= CIRCLE.minRoundness;
+  const { turn, size, roundness, sectors } = circleMeasure(tracker.samples, CIRCLE.minStep);
+  const isCircle =
+    turn >= CIRCLE.minTurn &&
+    size >= CIRCLE.minSize &&
+    roundness >= CIRCLE.minRoundness &&
+    sectors >= CIRCLE.minSectors;
   if (isCircle) {
     togglePause();
     circle.lastFired = now;
@@ -703,8 +709,10 @@ function showMeasures(measures) {
       `mov.    dx ${fixed(dx)} · dy ${fixed(dy)}`,
     ];
     if (name === "Right") {
-      const c = circleMeasure(trackers.circle.samples);
-      lines.push(`círculo ${c.turn.toFixed(0).padStart(4)}° · tam. ${fixed(c.size)} · red. ${fixed(c.roundness)}`);
+      const c = circleMeasure(trackers.circle.samples, CIRCLE.minStep);
+      lines.push(
+        `círculo ${c.turn.toFixed(0).padStart(4)}° · tam. ${fixed(c.size)} · red. ${fixed(c.roundness)} · dir. ${c.sectors}/8`,
+      );
     }
     setText(id, lines.join("\n"));
   }
